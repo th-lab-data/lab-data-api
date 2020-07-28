@@ -1,0 +1,24 @@
+/target/
+.classpath
+.project
+.settings
+.DS_Store
+lambda.iml
+dependency-reduced-pom.xml
+classes/artifacts/*/*.*
+*.iml
+*.metadata
+# virtual environment
+venv/
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# JetBrains IDE
+.idea/
+
+.vscode/
+
+

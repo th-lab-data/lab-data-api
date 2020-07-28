@@ -1,0 +1,474 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters": {
+        "LambdaDeployBucket": {
+            "Description": "S3 bucket that contains lambda jar",
+            "Type": "String"
+        },
+        "ElasticsearchHost": {
+            "Description": "URL of Elasticsearch host",
+            "Type": "String"
+        }
+    },
+    "Resources": {
+        "S3LabData": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "AccessControl": "Private",
+                "VersioningConfiguration": {
+                    "Status": "Suspended"
+                }
+            }
+        },
+        "KinesisSensorData": {
+            "Type": "AWS::Kinesis::Stream",
+            "Properties": {
+                "ShardCount": "1"
+            }
+        },
+        "LabDataAggregates": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Handler": "de.steinhae.lab.lambda.LabDataAggregates",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LabDataAggregatesRole",
+                        "Arn"
+                    ]
+                },
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaDeployBucket"
+                    },
+                    "S3Key": "lambda/lab-data-api-1.0-SNAPSHOT.jar"
+                },
+                "Environment": {
+                    "Variables": {
+                        "ES_HOST": {
+                            "Ref": "ElasticsearchHost"
+                        },
+                        "ES_PORT": "443",
+                        "ES_SCHEME": "https",
+                        "ES_INDEX_NAME": "lab-data"
+                    }
+                },
+                "Runtime": "java8",
+                "Timeout": 30,
+                "MemorySize": 512
+            }
+        },
+        "LabDataAggregatesRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": "LabDataAggregatesRole",
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "AWSLambdaBasicExecutionRole",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "LabDataConsumer": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Handler": "de.steinhae.lab.lambda.LabDataConsumer",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LabDataConsumerRole",
+                        "Arn"
+                    ]
+                },
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaDeployBucket"
+                    },
+                    "S3Key": "lambda/lab-data-api-1.0-SNAPSHOT.jar"
+                },
+                "Environment": {
+                    "Variables": {
+                        "ES_HOST": {
+                            "Ref": "ElasticsearchHost"
+                        },
+                        "ES_PORT": "443",
+                        "ES_SCHEME": "https",
+                        "ES_INDEX_NAME": "lab-data",
+                        "S3_BUCKET": {
+                            "Fn::Sub": "${S3LabData}"
+                        }
+                    }
+                },
+                "Runtime": "java8",
+                "Timeout": 120,
+                "MemorySize": 1024
+            }
+        },
+        "LabDataConsumerRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": "LabDataConsumerRole",
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "AWSLambdaBasicExecutionRole",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "AmazonS3FullAccess",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": "s3:*",
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "AmazonKinesisFullAccess",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": "kinesis:*",
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "EventSourceMapping": {
+            "Type": "AWS::Lambda::EventSourceMapping",
+            "Properties": {
+                "EventSourceArn": {
+                    "Fn::GetAtt": [
+                        "KinesisSensorData",
+                        "Arn"
+                    ]
+                },
+                "FunctionName": {
+                    "Fn::GetAtt": [
+                        "LabDataConsumer",
+                        "Arn"
+                    ]
+                },
+                "StartingPosition": "TRIM_HORIZON",
+                "BatchSize": 50,
+                "Enabled": true,
+                "MaximumBatchingWindowInSeconds": 60,
+                "MaximumRetryAttempts": 10,
+                "ParallelizationFactor": 2,
+                "BisectBatchOnFunctionError": true
+            }
+        },
+        "LabDataAPI": {
+            "Type": "AWS::ApiGateway::RestApi",
+            "Properties": {
+                "Name": "Lab Data Api",
+                "EndpointConfiguration": {
+                    "Types": [
+                        "REGIONAL"
+                    ]
+                },
+                "Description": "API used for lab sensor data requests",
+                "Body": {
+                    "swagger": "2.0",
+                    "info": {
+                        "version": "2020-07-25T15:45:43Z",
+                        "title": "Lab Data API"
+                    },
+                    "basePath": "/dev",
+                    "schemes": [
+                        "https"
+                    ],
+                    "paths": {
+                        "/lab/{id}/records": {
+                            "put": {
+                                "consumes": [
+                                    "application/json"
+                                ],
+                                "produces": [
+                                    "application/json"
+                                ],
+                                "parameters": [
+                                    {
+                                        "name": "id",
+                                        "in": "path",
+                                        "required": true,
+                                        "type": "string"
+                                    }
+                                ],
+                                "responses": {
+                                    "200": {
+                                        "description": "200 response",
+                                        "schema": {
+                                            "$ref": "#/definitions/Empty"
+                                        }
+                                    }
+                                },
+                                "x-amazon-apigateway-integration": {
+                                    "credentials": {
+                                        "Fn::GetAtt": [
+                                            "LabDataServiceApiRole",
+                                            "Arn"
+                                        ]
+                                    },
+                                    "uri": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "arn:aws:apigateway:",
+                                                {
+                                                    "Ref": "AWS::Region"
+                                                },
+                                                ":kinesis:action/PutRecord"
+                                            ]
+                                        ]
+                                    },
+                                    "responses": {
+                                        "default": {
+                                            "statusCode": "200"
+                                        }
+                                    },
+                                    "requestParameters": {
+                                        "integration.request.header.Content-Type": "'application/x-amz-json-1.1'"
+                                    },
+                                    "requestTemplates": {
+                                        "application/json": {
+                                            "Fn::Sub": "#set($payload = $input.json('$'))\n#set($data = \"{\"\"data\"\": $payload, \"\"lab_id\"\": \"\"$input.params('id')\"\"}\")\n{\n    \"Data\": \"$util.base64Encode($data)\",\n    \"PartitionKey\": \"$input.params('id')\",\n    \"StreamName\": \"${KinesisSensorData}\"\n}"
+                                        }
+                                    },
+                                    "passthroughBehavior": "never",
+                                    "httpMethod": "POST",
+                                    "type": "aws"
+                                }
+                            }
+                        },
+                        "/labs/aggregates": {
+                            "get": {
+                                "produces": [
+                                    "application/json"
+                                ],
+                                "parameters": [
+                                    {
+                                        "name": "page",
+                                        "in": "query",
+                                        "required": false,
+                                        "type": "string"
+                                    }
+                                ],
+                                "responses": {
+                                    "200": {
+                                        "description": "200 response",
+                                        "schema": {
+                                            "$ref": "#/definitions/Empty"
+                                        }
+                                    }
+                                },
+                                "x-amazon-apigateway-integration": {
+                                    "credentials": {
+                                        "Fn::GetAtt": [
+                                            "LabDataServiceApiRole",
+                                            "Arn"
+                                        ]
+                                    },
+                                    "uri": {
+                                        "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LabDataAggregates.Arn}/invocations"
+                                    },
+                                    "responses": {
+                                        "default": {
+                                            "statusCode": "200"
+                                        }
+                                    },
+                                    "passthroughBehavior": "when_no_match",
+                                    "httpMethod": "POST",
+                                    "contentHandling": "CONVERT_TO_TEXT",
+                                    "type": "aws_proxy"
+                                }
+                            }
+                        }
+                    },
+                    "definitions": {
+                        "Empty": {
+                            "type": "object",
+                            "title": "Empty Schema"
+                        }
+                    }
+                }
+            }
+        },
+        "LabDataServiceApiRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "apigateway.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Policies": [
+                    {
+                        "PolicyName": "ApiGatewayLogsPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:DescribeLogGroups",
+                                        "logs:DescribeLogStreams",
+                                        "logs:PutLogEvents",
+                                        "logs:GetLogEvents",
+                                        "logs:FilterLogEvents"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "AmazonKinesisFullAccess",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": "kinesis:*",
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "API_Service_Role_Policy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Action": "lambda:InvokeFunction",
+                                    "Resource": {
+                                        "Fn::GetAtt": [
+                                            "LabDataAggregates",
+                                            "Arn"
+                                        ]
+                                    },
+                                    "Effect": "Allow"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "LambdaPermissions": {
+            "Type": "AWS::Lambda::Permission",
+            "DependsOn": [
+                "LabDataAggregates"
+            ],
+            "Properties": {
+                "Action": "lambda:InvokeFunction",
+                "FunctionName": {
+                    "Ref": "LabDataAggregates"
+                },
+                "Principal": "apigateway.amazonaws.com",
+                "SourceArn": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "arn:aws:execute-api:",
+                            {
+                                "Ref": "AWS::Region"
+                            },
+                            ":",
+                            {
+                                "Ref": "AWS::AccountId"
+                            },
+                            ":",
+                            {
+                                "Ref": "LabDataAPI"
+                            },
+                            "/*/GET/labs/aggregates"
+                        ]
+                    ]
+                }
+            }
+        }
+    },
+    "Description": "Lab Data Deployment"
+}

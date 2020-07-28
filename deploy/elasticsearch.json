@@ -1,0 +1,20 @@
+{
+    "Resources": {
+        "ElasticsearchDomain": {
+            "Type": "AWS::Elasticsearch::Domain",
+            "Properties": {
+                "DomainName": "lab-sensor-data",
+                "ElasticsearchClusterConfig": {
+                    "InstanceCount": "1",
+                    "InstanceType": "r5.large.elasticsearch",
+                },
+                "ElasticsearchVersion": 7.7,
+                "EBSOptions": {
+                    "EBSEnabled": true,
+                    "VolumeSize": 20,
+                    "VolumeType": "gp2"
+                }
+            }
+        }
+    }
+}
