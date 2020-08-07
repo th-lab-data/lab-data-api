@@ -23,45 +23,36 @@ public class AverageDownsamplingService implements SensorEntryDownsampler {
             return sensorData;
         }
 
-        long first = sensorData.get(0).getTimestamp();
-        long last = sensorData.get(sensorData.size() - 1).getTimestamp();
-
-        List<Long> syncTimestamps = new LinkedList<>();
-        while (first < last) {
-            first = Math.min(first + cutOffInMs, last);
-            syncTimestamps.add(first);
-        }
-
-        SensorEntry previousDataPoint = new SensorEntry(sensorData.get(0));
-        SensorEntry dataPoint = new SensorEntry(sensorData.get(0));
-        int pos = 1;
-        int count = 1;
-        boolean justAdded = false;
-        for (long syncTimestamp : syncTimestamps) {
-            while (dataPoint.getTimestamp() < syncTimestamp && pos < sensorData.size()) {
-                dataPoint = sensorData.get(pos);
-                if (dataPoint.getTimestamp() >= syncTimestamp) {
-                    previousDataPoint.setTemperature(previousDataPoint.getTemperature() / count);
-                    previousDataPoint.setHumidity(previousDataPoint.getHumidity() / count);
-                    count = 1;
-                    downsampled.add(previousDataPoint);
-                    previousDataPoint = dataPoint;
-                    justAdded = true;
-                } else {
-                    previousDataPoint.setTemperature(previousDataPoint.getTemperature() + dataPoint.getTemperature());
-                    previousDataPoint.setHumidity(previousDataPoint.getHumidity() + dataPoint.getHumidity());
-                    count++;
-                    justAdded = false;
+        SensorEntry first = sensorData.get(0);
+        SensorEntry avg = new SensorEntry(first);
+        long cutOff = first.getTimestamp() + cutOffInMs;
+        int avgCount = 1;
+        for (int i = 1; i < sensorData.size(); i++) {
+            if (sensorData.get(i).getTimestamp() >= cutOff) {
+                downsampled.add(calculateAvg(avg, avgCount));
+                cutOff += cutOffInMs;
+                avgCount = 1;
+                avg = sensorData.get(i);
+                // there is only one element left that we need to add
+                if (i == sensorData.size() - 1) {
+                    downsampled.add(avg);
                 }
-                pos++;
+            } else {
+                avg.setHumidity(avg.getHumidity() + sensorData.get(i).getHumidity());
+                avg.setTemperature(avg.getTemperature() + sensorData.get(i).getTemperature());
+                avgCount++;
             }
-            if (pos == sensorData.size() && !justAdded) {
-                previousDataPoint.setTemperature(previousDataPoint.getTemperature() / count);
-                previousDataPoint.setHumidity(previousDataPoint.getHumidity() / count);
-                downsampled.add(previousDataPoint);
-                break;
-            }
+        }
+        if (avgCount > 1) {
+            downsampled.add(calculateAvg(avg, avgCount));
         }
         return downsampled;
+    }
+
+    private SensorEntry calculateAvg(SensorEntry sum, int count) {
+        SensorEntry entry = new SensorEntry(sum);
+        entry.setTemperature(entry.getTemperature() / count);
+        entry.setHumidity(entry.getHumidity() / count);
+        return entry;
     }
 }
